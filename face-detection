@@ -1,0 +1,99 @@
+import cv2
+import dlib
+import numpy as np
+import pandas as pd
+import os
+
+# Pastikan jalur file sesuai dengan lokasi file model Anda
+model_path = r'D:\coding 2024\face2\shape_predictor_68_face_landmarks.dat'
+face_rec_model_path = r'D:\coding 2024\face2\dlib_face_recognition_resnet_model_v1.dat'
+face_data_path = 'face_data.csv'
+
+if not os.path.isfile(model_path):
+    raise FileNotFoundError(f"File not found: {model_path}")
+if not os.path.isfile(face_rec_model_path):
+    raise FileNotFoundError(f"File not found: {face_rec_model_path}")
+
+# Load the pre-trained face detector, shape predictor, and face recognition model
+detector = dlib.get_frontal_face_detector()
+predictor = dlib.shape_predictor(model_path)
+face_rec_model = dlib.face_recognition_model_v1(face_rec_model_path)
+
+# Function to extract face features
+def extract_face_features(image, face):
+    shape = predictor(image, face)
+    face_descriptor = face_rec_model.compute_face_descriptor(image, shape)
+    return np.array(face_descriptor)
+
+# Function to save face features with nametag
+def save_face_features(name, features):
+    df = pd.DataFrame([np.append(features, name)])
+    df.to_csv(face_data_path, mode='a', header=not os.path.isfile(face_data_path), index=False)
+
+# Function to recognize face from stored data
+def recognize_face(features):
+    if not os.path.isfile(face_data_path):
+        return "Unknown"
+    
+    df = pd.read_csv(face_data_path, header=None)
+    known_faces = df.iloc[:, :-1].values
+    names = df.iloc[:, -1].values
+    
+    distances = np.linalg.norm(known_faces - features, axis=1)
+    min_distance = np.min(distances)
+    if min_distance < 0.6:  # Threshold value
+        return names[np.argmin(distances)]
+    else:
+        return "Unknown"
+
+# Capture video from the default camera
+cap = cv2.VideoCapture(0)
+
+while True:
+    # Read a frame from the video capture
+    ret, frame = cap.read()
+    
+    # Detect faces in the frame
+    faces = detector(frame)
+    
+    for face in faces:
+        # Get the landmarks/parts for the face in box d.
+        features = extract_face_features(frame, face)
+        
+        # Recognize the face
+        name = recognize_face(features)
+        
+        # Draw the face landmarks on the screen
+        shape = predictor(frame, face)
+        for n in range(0, 68):
+            x = shape.part(n).x
+            y = shape.part(n).y
+            cv2.circle(frame, (x, y), 2, (255, 0, 0), -1)
+        
+        # Draw a rectangle around the face
+        x, y, w, h = (face.left(), face.top(), face.width(), face.height())
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        
+        # Put the nametag
+        cv2.putText(frame, name, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+    
+    # Display the frame with the detected faces and landmarks
+    cv2.imshow('Face Detection and Recognition', frame)
+    
+    # Check for key press
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):
+        break
+    elif key == ord('s'):
+        if len(faces) > 0:
+            face = faces[0]
+            features = extract_face_features(frame, face)
+            name = input("Enter the name of the person: ")
+            save_face_features(name, features)
+            print(f"Face features for {name} saved successfully.")
+        else:
+            print("No face detected to save.")
+
+# Release the video capture and close the windows
+cap.release()
+cv2.destroyAllWindows()
